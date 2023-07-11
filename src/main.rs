@@ -7,6 +7,9 @@ pub use types::*;
 pub mod business;
 pub use business::*;
 
+pub mod document_search;
+pub use document_search::*;
+
 pub mod routes;
 pub use routes::*;
 

@@ -1,22 +1,26 @@
 use axum::http::StatusCode;
-use probly_search::{score::{bm25, zero_to_one}, Index, QueryResult};
+use probly_search::QueryResult;
 use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
-use tracing::{debug, field::debug};
+use tracing::debug;
 
 use crate::{
-    description_extract, title_extract, tokenizer, Category, CustError, Item, ItemSearch, Name,
-    Result, ID,
+    description_extract, title_extract, tokenizer, Category, CustError, IndexEngine, Item,
+    ItemSearch, Name, Result, ID,
 };
 #[derive(Debug)]
 pub struct BusinessRules {
     conn: sqlx::SqlitePool,
-    index: RwLock<Index<ID>>,
+    index: RwLock<IndexEngine<ID, ItemSearch>>,
 }
 
 impl BusinessRules {
     pub async fn new() -> Self {
-        let index = RwLock::new(Index::new(2));
+        let index = RwLock::new(IndexEngine::new(
+            2,
+            vec![title_extract, description_extract],
+            tokenizer,
+        ));
         let conn = sqlx::sqlite::SqlitePoolOptions::new()
             .connect("sqlite:db.sqlite")
             .await
@@ -32,14 +36,7 @@ impl BusinessRules {
             .await
             .unwrap()
             .into_iter()
-            .for_each(|item| {
-                index.add_document(
-                    &[title_extract, description_extract],
-                    tokenizer,
-                    item.id,
-                    &item,
-                )
-            });
+            .for_each(|item| index.index(item.id, &item));
     }
 
     pub async fn init_db(&self) {
@@ -143,12 +140,7 @@ impl BusinessRules {
         };
 
         let mut index = self.index.write().await;
-        index.add_document(
-            &[title_extract, description_extract],
-            tokenizer,
-            id,
-            &item_search,
-        );
+        index.index(id, &item_search);
         debug!("Item added: {:?}", item);
         Ok(item)
     }
@@ -170,13 +162,12 @@ impl BusinessRules {
 
     pub async fn find_items(&self, name: Name) -> Result<Vec<Item>> {
         debug!("Searching for: {:?}", name);
-        let mut result =
-            self.index
-                .read()
-                .await
-                .query(name.as_str(), &mut bm25::new(), tokenizer, &[1.0, 0.5]);
+        let mut result = self.index.read().await.query(name.as_str(), &[1.0, 0.5]);
         if result.is_empty() {
-            return Err(CustError::new("no items for search query".to_string(), StatusCode::NOT_FOUND));
+            return Err(CustError::new(
+                "no items for search query".to_string(),
+                StatusCode::NOT_FOUND,
+            ));
         }
         debug!("Search result: {:?}", result);
 
