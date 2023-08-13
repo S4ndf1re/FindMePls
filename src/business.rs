@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use axum::http::StatusCode;
 use probly_search::QueryResult;
+use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
 use tracing::debug;
@@ -10,6 +11,24 @@ use crate::{
     description_extract, title_extract, tokenizer, Category, CustError, FileStorage, IndexEngine,
     Item, ItemSearch, Name, Result, ID,
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct DbCategory {
+    pub id: Option<ID>,
+    pub name: Name,
+    pub parent_category: Option<ID>,
+}
+
+impl From<DbCategory> for Category {
+    fn from(db: DbCategory) -> Self {
+        Self {
+            id: db.id,
+            name: db.name,
+            parent_category: db.parent_category,
+            thumbnail: None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct BusinessRules {
@@ -69,7 +88,7 @@ impl BusinessRules {
         db.execute(
             r#"
         CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             parent_category INTEGER,
             FOREIGN KEY (parent_category) REFERENCES categories(id)
@@ -189,7 +208,10 @@ impl BusinessRules {
         result.sort_by(|x, y| x.score.total_cmp(&y.score));
         let ids: Vec<ID> = result.iter().map(|x| x.key).collect();
         let params = format!("?{}", ", ?".repeat(ids.len() - 1));
-        let query_str = format!("SELECT * FROM items WHERE id IN ({})", params);
+        let query_str = format!(
+            "SELECT id, name, description, category_id, price FROM items WHERE id IN ({})",
+            params
+        );
 
         let query = sqlx::query_as::<_, Item>(&query_str);
         let query = ids.into_iter().fold(query, |query, id| query.bind(id));
@@ -211,9 +233,11 @@ impl BusinessRules {
     }
 
     pub async fn get_all_items(&self) -> Result<Vec<Item>> {
-        let mut items = sqlx::query_as::<_, Item>("SELECT * FROM items")
-            .fetch_all(&self.conn)
-            .await?;
+        let mut items = sqlx::query_as::<_, Item>(
+            "SELECT id, name, description, category_id, price FROM items",
+        )
+        .fetch_all(&self.conn)
+        .await?;
 
         for item in &mut items {
             self.item_files.read(item).await?;
@@ -225,10 +249,12 @@ impl BusinessRules {
     pub async fn delete_item(&self, id: ID) -> Result<Item> {
         let mut tx = self.conn.begin().await?;
 
-        let item = sqlx::query_as::<_, Item>("SELECT * from items WHERE id = ?")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await?;
+        let item = sqlx::query_as::<_, Item>(
+            "SELECT id, name, description, category_id, price from items WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
 
         sqlx::query("DELETE FROM items WHERE id = ?")
             .bind(id)
@@ -248,11 +274,14 @@ impl BusinessRules {
         category.id = None;
         let mut tx = self.conn.begin().await?;
 
-        let tmp_cat = sqlx::query_as::<_, Category>("SELECT * FROM categories WHERE name = ?")
-            .bind(category.name.clone())
-            .bind(category.parent_category)
-            .fetch_optional(&mut *tx)
-            .await?;
+        let tmp_cat: Option<Category> = sqlx::query_as::<_, DbCategory>(
+            "SELECT id, name, parent_category FROM categories WHERE name = ?",
+        )
+        .bind(category.name.clone())
+        .bind(category.parent_category)
+        .fetch_optional(&mut *tx)
+        .await?
+        .map(Into::into);
         debug!("tmp_cat: {:?}", tmp_cat);
 
         if tmp_cat.is_some() {
@@ -283,10 +312,12 @@ impl BusinessRules {
     }
 
     pub async fn get_all_categories(&self) -> Result<Vec<Category>> {
-        let mut categories =
-            sqlx::query_as::<_, Category>("SELECT id, name, parent_category FROM categories")
-                .fetch_all(&self.conn)
-                .await?;
+        let mut categories: Vec<Category> = sqlx::query_as::<_, DbCategory>("SELECT * FROM categories")
+            .fetch_all(&self.conn)
+            .await?
+            .into_iter()
+            .map(|c| c.into())
+            .collect();
 
         for category in &mut categories {
             self.category_files.read(category).await?;

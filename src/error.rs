@@ -36,6 +36,7 @@ impl IntoResponse for CustError {
 
 impl From<sqlx::Error> for CustError {
     fn from(e: sqlx::Error) -> Self {
+        dbg!(&e);
         Self {
             message: format!("Database error: {}", e),
             status: StatusCode::INTERNAL_SERVER_ERROR,

@@ -1,7 +1,7 @@
 #! /bin/sh
 
 # Remove old db.sqlite
-rm -f dq.sqlite
+rm -f db.sqlite
 
 # Create new db.sqlite
 touch db.sqlite

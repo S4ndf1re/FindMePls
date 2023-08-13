@@ -1,19 +1,17 @@
-use std::{marker::PhantomData, path::PathBuf, borrow::Cow};
+use std::{borrow::Cow, marker::PhantomData, path::PathBuf};
 
 use tokio::{
-    fs::{File, create_dir_all},
+    fs::{create_dir_all, File},
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
 use crate::Result;
-
 
 pub trait Storeable {
     fn filename<'a>(&'a self) -> Result<Cow<'a, str>>;
     fn as_bytes<'a>(&'a self) -> Result<Cow<'a, Vec<u8>>>;
     fn change_from_bytes(&mut self, bytes: &[u8]);
 }
-
 
 #[derive(Debug)]
 pub struct FileStorage<D> {
@@ -32,10 +30,11 @@ where
         }
     }
 
-    pub async fn store(&self, data: &D) -> Result<()>
-    {
+    pub async fn store(&self, data: &D) -> Result<()> {
         let mut path = self.path.clone();
+        dbg!(&path);
         create_dir_all(path.clone()).await?;
+        dbg!(&path);
         path.push(data.filename()?.as_ref());
         let mut file = File::create(path).await?;
         file.write_all(&(data.as_bytes()?)).await?;
@@ -43,10 +42,10 @@ where
         Ok(())
     }
 
-    pub async fn read(&self, data: &mut D) -> Result<()>
-    {
+    pub async fn read(&self, data: &mut D) -> Result<()> {
         let mut path = self.path.clone();
         path.push(data.filename()?.as_ref());
+        dbg!(&path);
         let mut file = File::open(path).await?;
 
         let mut vec = vec![];
