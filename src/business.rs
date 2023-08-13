@@ -1,16 +1,30 @@
+use std::path::PathBuf;
+
 use axum::http::StatusCode;
+use base64::Engine;
 use probly_search::QueryResult;
+use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
 use tracing::debug;
 
 use crate::{
-    description_extract, title_extract, tokenizer, Category, CustError, IndexEngine, Item,
-    ItemSearch, Name, Result, ID,
+    description_extract, title_extract, tokenizer, Category, CustError, FileStorage, IndexEngine,
+    Item, ItemSearch, Name, Result, ID,
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+struct DBCategory {
+    pub id: Option<ID>,
+    pub name: Name,
+    pub parent_category: Option<ID>,
+    pub thumbnail: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub struct BusinessRules {
     conn: sqlx::SqlitePool,
+    category_files: FileStorage<Category>,
     index: RwLock<IndexEngine<ID, ItemSearch>>,
 }
 
@@ -26,7 +40,11 @@ impl BusinessRules {
             .await
             .unwrap();
 
-        Self { conn, index }
+        Self {
+            conn,
+            category_files: FileStorage::new(PathBuf::from("./images")),
+            index,
+        }
     }
 
     pub async fn init(&self) {
@@ -62,6 +80,7 @@ impl BusinessRules {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             parent_category INTEGER,
+            thumbnail BLOB,
             FOREIGN KEY (parent_category) REFERENCES categories(id)
         );
         "#,
@@ -236,9 +255,17 @@ impl BusinessRules {
             ));
         }
 
-        sqlx::query("INSERT INTO categories (name, parent_category) VALUES (?, ?)")
+        let thumbnail_data = if category.thumbnail.is_some() {
+            let engine = base64::engine::general_purpose::STANDARD;
+            engine.decode(category.thumbnail.as_ref().unwrap())?
+        } else {
+            vec![]
+        };
+
+        sqlx::query("INSERT INTO categories (name, parent_category, thumbnail) VALUES (?, ?, ?)")
             .bind(category.name.clone())
             .bind(category.parent_category)
+            .bind(thumbnail_data)
             .execute(&mut *tx)
             .await?;
 
@@ -257,8 +284,19 @@ impl BusinessRules {
     }
 
     pub async fn get_all_categories(&self) -> Result<Vec<Category>> {
-        Ok(sqlx::query_as::<_, Category>("SELECT * FROM categories")
+        let engine = base64::engine::general_purpose::STANDARD;
+        let categories = sqlx::query_as::<_, DBCategory>("SELECT * FROM categories")
             .fetch_all(&self.conn)
-            .await?)
+            .await?;
+
+        Ok(categories
+            .into_iter()
+            .map(|c| Category {
+                id: c.id,
+                name: c.name,
+                parent_category: c.parent_category,
+                thumbnail: Some(engine.encode(c.thumbnail)),
+            })
+            .collect::<Vec<Category>>())
     }
 }

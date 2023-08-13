@@ -1,3 +1,5 @@
+use std::io;
+
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response}, body,
@@ -36,6 +38,24 @@ impl From<sqlx::Error> for CustError {
     fn from(e: sqlx::Error) -> Self {
         Self {
             message: format!("Database error: {}", e),
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<base64::DecodeError> for CustError {
+    fn from(e: base64::DecodeError) -> Self {
+        Self {
+            message: format!("Parsing error: {}", e),
+            status: StatusCode::BAD_REQUEST,
+        }
+    }
+}
+
+impl From<io::Error> for CustError {
+    fn from(e: io::Error) -> Self {
+        Self {
+            message: format!("IO error: {}", e),
             status: StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

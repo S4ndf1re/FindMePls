@@ -1,3 +1,6 @@
+pub mod files;
+pub use files::*;
+
 pub mod types;
 use std::sync::Arc;
 use tracing::log::info;

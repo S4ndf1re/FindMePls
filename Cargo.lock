@@ -492,6 +492,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-macros",
+ "base64",
  "distance",
  "image",
  "probly-search",
