@@ -11,7 +11,6 @@ use crate::{
     Item, ItemSearch, Name, Result, ID,
 };
 
-
 #[derive(Debug)]
 pub struct BusinessRules {
     conn: sqlx::SqlitePool,
@@ -158,10 +157,12 @@ impl BusinessRules {
     }
 
     pub async fn get_item(&self, id: ID) -> Result<Item> {
-        let mut item = sqlx::query_as::<_, Item>("SELECT * FROM items WHERE id = ?")
-            .bind(id)
-            .fetch_one(&self.conn)
-            .await?;
+        let mut item = sqlx::query_as::<_, Item>(
+            "SELECT id, name, description, category_id, price FROM items WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&self.conn)
+        .await?;
 
         self.item_files.read(&mut item).await?;
 
@@ -277,15 +278,15 @@ impl BusinessRules {
 
         tx.commit().await?;
 
-
         debug!("added new category: {:?}", category);
         Ok(category)
     }
 
     pub async fn get_all_categories(&self) -> Result<Vec<Category>> {
-        let mut categories = sqlx::query_as::<_, Category>("SELECT * FROM categories")
-            .fetch_all(&self.conn)
-            .await?;
+        let mut categories =
+            sqlx::query_as::<_, Category>("SELECT id, name, parent_category FROM categories")
+                .fetch_all(&self.conn)
+                .await?;
 
         for category in &mut categories {
             self.category_files.read(category).await?;
