@@ -73,7 +73,6 @@ impl BusinessRules {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             parent_category INTEGER,
-            thumbnail BLOB,
             FOREIGN KEY (parent_category) REFERENCES categories(id)
         );
         "#,
