@@ -261,7 +261,7 @@ impl BusinessRules {
             ));
         }
 
-        sqlx::query("INSERT INTO categories (name, parent_category) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO categories (name, parent_category) VALUES (?, ?)")
             .bind(category.name.clone())
             .bind(category.parent_category)
             .execute(&mut *tx)
