@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, path::PathBuf, borrow::Cow};
 
 use tokio::{
-    fs::File,
+    fs::{File, create_dir_all},
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
@@ -32,9 +32,10 @@ where
         }
     }
 
-    pub async fn store<N>(&self, data: &D) -> Result<()>
+    pub async fn store(&self, data: &D) -> Result<()>
     {
         let mut path = self.path.clone();
+        create_dir_all(path.clone()).await?;
         path.push(data.filename()?.as_ref());
         let mut file = File::create(path).await?;
         file.write_all(&(data.as_bytes()?)).await?;
@@ -42,7 +43,7 @@ where
         Ok(())
     }
 
-    pub async fn read<N>(&self, data: &mut D) -> Result<()>
+    pub async fn read(&self, data: &mut D) -> Result<()>
     {
         let mut path = self.path.clone();
         path.push(data.filename()?.as_ref());

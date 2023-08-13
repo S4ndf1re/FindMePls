@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 
 use axum::http::StatusCode;
-use base64::Engine;
 use probly_search::QueryResult;
-use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
 use tracing::debug;
@@ -13,18 +11,12 @@ use crate::{
     Item, ItemSearch, Name, Result, ID,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-struct DBCategory {
-    pub id: Option<ID>,
-    pub name: Name,
-    pub parent_category: Option<ID>,
-    pub thumbnail: Vec<u8>,
-}
 
 #[derive(Debug)]
 pub struct BusinessRules {
     conn: sqlx::SqlitePool,
     category_files: FileStorage<Category>,
+    item_files: FileStorage<Item>,
     index: RwLock<IndexEngine<ID, ItemSearch>>,
 }
 
@@ -42,7 +34,8 @@ impl BusinessRules {
 
         Self {
             conn,
-            category_files: FileStorage::new(PathBuf::from("./images")),
+            category_files: FileStorage::new(PathBuf::from("./categories")),
+            item_files: FileStorage::new(PathBuf::from("./items")),
             index,
         }
     }
@@ -147,10 +140,11 @@ impl BusinessRules {
             .await?;
 
         let id: ID = last_inserted.get("id");
+        item.id = Some(id);
+
+        self.item_files.store(&item).await?;
 
         tx.commit().await?;
-
-        item.id = Some(id);
 
         let item_search = ItemSearch {
             id,
@@ -165,10 +159,12 @@ impl BusinessRules {
     }
 
     pub async fn get_item(&self, id: ID) -> Result<Item> {
-        let item = sqlx::query_as::<_, Item>("SELECT * FROM items WHERE id = ?")
+        let mut item = sqlx::query_as::<_, Item>("SELECT * FROM items WHERE id = ?")
             .bind(id)
             .fetch_one(&self.conn)
             .await?;
+
+        self.item_files.read(&mut item).await?;
 
         Ok(item)
     }
@@ -203,16 +199,27 @@ impl BusinessRules {
             .into_iter()
             .map(|item| (self.find_score_for_item(item.id.unwrap(), &result), item))
             .collect();
+
         let mut items: Vec<_> = items.into_iter().filter(|x| x.0.is_some()).collect();
+        for (_, item) in &mut items {
+            self.item_files.read(item).await?;
+        }
+
         items.sort_by(|x, y| x.0.unwrap().total_cmp(&y.0.unwrap()));
 
         Ok(items.into_iter().map(|x| x.1).rev().collect())
     }
 
     pub async fn get_all_items(&self) -> Result<Vec<Item>> {
-        Ok(sqlx::query_as::<_, Item>("SELECT * FROM items")
+        let mut items = sqlx::query_as::<_, Item>("SELECT * FROM items")
             .fetch_all(&self.conn)
-            .await?)
+            .await?;
+
+        for item in &mut items {
+            self.item_files.read(item).await?;
+        }
+
+        Ok(items)
     }
 
     pub async fn delete_item(&self, id: ID) -> Result<Item> {
@@ -255,17 +262,9 @@ impl BusinessRules {
             ));
         }
 
-        let thumbnail_data = if category.thumbnail.is_some() {
-            let engine = base64::engine::general_purpose::STANDARD;
-            engine.decode(category.thumbnail.as_ref().unwrap())?
-        } else {
-            vec![]
-        };
-
-        sqlx::query("INSERT INTO categories (name, parent_category, thumbnail) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO categories (name, parent_category) VALUES (?, ?, ?)")
             .bind(category.name.clone())
             .bind(category.parent_category)
-            .bind(thumbnail_data)
             .execute(&mut *tx)
             .await?;
 
@@ -274,29 +273,25 @@ impl BusinessRules {
             .await?;
 
         let id: ID = last_inserted.get("id");
+        category.id = Some(id);
+        self.category_files.store(&category).await?;
 
         tx.commit().await?;
 
-        category.id = Some(id);
 
         debug!("added new category: {:?}", category);
         Ok(category)
     }
 
     pub async fn get_all_categories(&self) -> Result<Vec<Category>> {
-        let engine = base64::engine::general_purpose::STANDARD;
-        let categories = sqlx::query_as::<_, DBCategory>("SELECT * FROM categories")
+        let mut categories = sqlx::query_as::<_, Category>("SELECT * FROM categories")
             .fetch_all(&self.conn)
             .await?;
 
-        Ok(categories
-            .into_iter()
-            .map(|c| Category {
-                id: c.id,
-                name: c.name,
-                parent_category: c.parent_category,
-                thumbnail: Some(engine.encode(c.thumbnail)),
-            })
-            .collect::<Vec<Category>>())
+        for category in &mut categories {
+            self.category_files.read(category).await?;
+        }
+
+        Ok(categories)
     }
 }
