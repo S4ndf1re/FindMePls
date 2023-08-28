@@ -1,4 +1,8 @@
 pub mod files;
+use doc_search::EmptyWordFilter;
+use doc_search::Index;
+use doc_search::MemoryStorage;
+use doc_search::SimpleTokenizer;
 pub use files::*;
 
 pub mod types;
@@ -9,9 +13,6 @@ pub use types::*;
 
 pub mod business;
 pub use business::*;
-
-pub mod document_search;
-pub use document_search::*;
 
 pub mod routes;
 pub use routes::*;
@@ -30,7 +31,15 @@ async fn main() {
         .with_max_level(Level::DEBUG)
         .init();
     info!("Starting up");
-    let state = BusinessRules::new().await;
+
+    let tokenizer = SimpleTokenizer::new(); 
+    let filter = EmptyWordFilter{}; 
+    let storage = MemoryStorage::new();
+
+    // TODO: add qdrant
+    let index = Index::new(None, storage);
+
+    let state = BusinessRules::new(index, tokenizer, filter).await;
 
     state.init_db().await;
     state.init().await;

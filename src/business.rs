@@ -1,16 +1,13 @@
-use std::path::PathBuf;
+use std::{ops::Deref, path::PathBuf, sync::Arc};
 
 use axum::http::StatusCode;
-use probly_search::QueryResult;
+use doc_search::{Document, EmptyWordFilter, Index, MemoryStorage, SimpleTokenizer};
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
 use tracing::debug;
 
-use crate::{
-    description_extract, title_extract, tokenizer, Category, CustError, FileStorage, IndexEngine,
-    Item, ItemSearch, Name, Price, Result, ID,
-};
+use crate::{Category, CustError, FileStorage, Item, Name, Price, Result, ID};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct DbCategory {
@@ -36,7 +33,7 @@ impl From<Category> for DbCategory {
             id: db.id,
             name: db.name,
             parent_category: db.parent_category,
-        } 
+        }
     }
 }
 
@@ -75,21 +72,22 @@ impl From<Item> for DbItem {
     }
 }
 
-#[derive(Debug)]
 pub struct BusinessRules {
     conn: sqlx::SqlitePool,
     category_files: FileStorage<Category>,
     item_files: FileStorage<Item>,
-    index: RwLock<IndexEngine<ID, ItemSearch>>,
+    index: RwLock<Index<i64, MemoryStorage<i64>, PathBuf>>,
+    tokenizer: SimpleTokenizer,
+    filter: EmptyWordFilter,
 }
 
 impl BusinessRules {
-    pub async fn new() -> Self {
-        let index = RwLock::new(IndexEngine::new(
-            2,
-            vec![title_extract, description_extract],
-            tokenizer,
-        ));
+    pub async fn new(
+        index: Index<i64, MemoryStorage<i64>, PathBuf>,
+        tokenizer: SimpleTokenizer,
+        filter: EmptyWordFilter,
+    ) -> Self {
+        let index = RwLock::new(index);
         let conn = sqlx::sqlite::SqlitePoolOptions::new()
             .connect("sqlite:db.sqlite")
             .await
@@ -100,17 +98,14 @@ impl BusinessRules {
             category_files: FileStorage::new(PathBuf::from("./categories")),
             item_files: FileStorage::new(PathBuf::from("./items")),
             index,
+            tokenizer,
+            filter,
         }
     }
 
     pub async fn init(&self) {
-        let mut index = self.index.write().await;
-        sqlx::query_as::<_, ItemSearch>("SELECT id, name, description FROM items")
-            .fetch_all(&self.conn)
-            .await
-            .unwrap()
-            .into_iter()
-            .for_each(|item| index.index(item.id, &item));
+        // NOTE: with the new storage engine, the loading on startup is not needed, since the index
+        // is kept in a different storage
     }
 
     pub async fn init_db(&self) {
@@ -208,15 +203,16 @@ impl BusinessRules {
 
         tx.commit().await?;
 
-        let item_search = ItemSearch {
-            id,
-            name: item.name.clone(),
-            description: item.description.clone(),
+        let data = match &item.description {
+            Some(desc) => format!("{} {}", item.name, desc),
+            None => format!("{}", item.name),
         };
 
+        let document = Document::new(id as i64, data, &self.filter, &self.tokenizer);
+
         let mut index = self.index.write().await;
-        index.index(id, &item_search);
-        debug!("Item added: {:?}", item);
+        index.insert_document(document).await?;
+
         Ok(item)
     }
 
@@ -232,15 +228,23 @@ impl BusinessRules {
         Ok(item)
     }
 
-    fn find_score_for_item(&self, id: ID, query_res: &Vec<QueryResult<ID>>) -> Option<f64> {
-        query_res
-            .iter()
-            .find_map(|x| if x.key == id { Some(x.score) } else { None })
+    fn find_score_for_item(&self, id: ID, query_res: &Vec<(f64, &Document<i64>)>) -> Option<f64> {
+        query_res.iter().find_map(|(x, v)| {
+            if *v.get_id() as i32 == id {
+                Some(x.clone())
+            } else {
+                None
+            }
+        })
     }
 
     pub async fn find_items(&self, name: Name) -> Result<Vec<Item>> {
         debug!("Searching for: {:?}", name);
-        let mut result = self.index.read().await.query(name.as_str(), &[1.0, 0.5]);
+        let index = self.index.read().await;
+        let mut result = index
+            .tf_idf_all(name.as_str(), &self.tokenizer, &self.filter)
+            .await;
+
         if result.is_empty() {
             return Err(CustError::new(
                 "no items for search query".to_string(),
@@ -249,13 +253,16 @@ impl BusinessRules {
         }
         debug!("Search result: {:?}", result);
 
-        result.sort_by(|x, y| x.score.total_cmp(&y.score));
-        let ids: Vec<ID> = result.iter().map(|x| x.key).collect();
+        result.sort_by(|(x, _), (y, _)| x.total_cmp(y));
+
+        let ids: Vec<Arc<i64>> = result.iter().map(|(_x, v)| v.get_id()).collect();
         let params = format!("?{}", ", ?".repeat(ids.len() - 1));
         let query_str = format!("SELECT * FROM items WHERE id IN ({})", params);
 
         let query = sqlx::query_as::<_, DbItem>(&query_str);
-        let query = ids.into_iter().fold(query, |query, id| query.bind(id));
+        let query = ids
+            .into_iter()
+            .fold(query, |query, id| query.bind(id.deref().clone()));
 
         let items = query.fetch_all(&self.conn).await?;
         let items: Vec<(Option<f64>, Item)> = items
@@ -296,20 +303,22 @@ impl BusinessRules {
     pub async fn delete_item(&self, id: ID) -> Result<Item> {
         let mut tx = self.conn.begin().await?;
 
-        let item: Item = sqlx::query_as::<_, DbItem>(
-            "SELECT * from items WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?
-        .into();
+        let item: Item = sqlx::query_as::<_, DbItem>("SELECT * from items WHERE id = ?")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?
+            .into();
 
         sqlx::query("DELETE FROM items WHERE id = ?")
             .bind(id)
             .execute(&mut *tx)
             .await?;
 
-        self.index.write().await.remove_document(id);
+        // NOTE: This is to release the future faster
+        {
+            let mut index = self.index.write().await;
+            let _ = index.remove_document(Arc::new(id as i64)).await?;
+        }
 
         tx.commit().await?;
 
@@ -322,14 +331,13 @@ impl BusinessRules {
         category.id = None;
         let mut tx = self.conn.begin().await?;
 
-        let tmp_cat: Option<Category> = sqlx::query_as::<_, DbCategory>(
-            "SELECT * FROM categories WHERE name = ?",
-        )
-        .bind(category.name.clone())
-        .bind(category.parent_category)
-        .fetch_optional(&mut *tx)
-        .await?
-        .map(Into::into);
+        let tmp_cat: Option<Category> =
+            sqlx::query_as::<_, DbCategory>("SELECT * FROM categories WHERE name = ?")
+                .bind(category.name.clone())
+                .bind(category.parent_category)
+                .fetch_optional(&mut *tx)
+                .await?
+                .map(Into::into);
         debug!("tmp_cat: {:?}", tmp_cat);
 
         if tmp_cat.is_some() {

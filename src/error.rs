@@ -61,3 +61,12 @@ impl From<io::Error> for CustError {
         }
     }
 }
+
+impl From<anyhow::Error> for CustError {
+    fn from(e: anyhow::Error) -> Self {
+        Self {
+            message: format!("Error: {}", e),
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+} 
