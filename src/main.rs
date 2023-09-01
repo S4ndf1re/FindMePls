@@ -1,14 +1,26 @@
-pub mod files;
 use doc_search::EmptyWordFilter;
 use doc_search::Index;
 use doc_search::MemoryStorage;
 use doc_search::SimpleTokenizer;
-pub use files::*;
+use futures::join;
+use tonic::transport::Server;
 
-pub mod types;
 use std::sync::Arc;
 use tracing::log::info;
 use tracing::Level;
+
+use axum::routing::delete;
+use axum::routing::get;
+use axum::routing::post;
+use axum::Router;
+
+pub mod grpc_service;
+pub use grpc_service::*;
+
+pub mod files;
+pub use files::*;
+
+pub mod types;
 pub use types::*;
 
 pub mod business;
@@ -20,10 +32,7 @@ pub use routes::*;
 pub mod error;
 pub use error::*;
 
-use axum::routing::delete;
-use axum::routing::get;
-use axum::routing::post;
-use axum::Router;
+
 
 #[tokio::main]
 async fn main() {
@@ -32,8 +41,8 @@ async fn main() {
         .init();
     info!("Starting up");
 
-    let tokenizer = SimpleTokenizer::new(); 
-    let filter = EmptyWordFilter{}; 
+    let tokenizer = SimpleTokenizer::new();
+    let filter = EmptyWordFilter {};
     let storage = MemoryStorage::new();
 
     // TODO: add qdrant
@@ -78,9 +87,27 @@ async fn main() {
 
     let app = app.with_state(Arc::new(state));
 
-    // run it with hyper on localhost:3000
-    axum::Server::bind(&"0.0.0.0:8080".parse().unwrap())
-        .serve(app.into_make_service())
+    let web_future = tokio::spawn(async {
+        // run it with hyper on localhost:3000
+        axum::Server::bind(&"0.0.0.0:8080".parse().unwrap())
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    });
+
+
+    let grpc_future = tokio::spawn(async {
+    let addr = "[::1]:50051".parse().unwrap();
+    let greeter = MyGreeter::default();
+    Server::builder()
+        .add_service(GreeterServer::new(greeter))
+        .serve(addr)
         .await
         .unwrap();
+    });
+
+    let (web_res, grpc_res) = join!(web_future, grpc_future);
+    web_res.unwrap();
+    grpc_res.unwrap();
+
 }

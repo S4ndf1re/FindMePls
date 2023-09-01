@@ -23,3 +23,8 @@ distance = "0.4.0"
 base64 = "0.21.2"
 doc_search = { git = "https://github.com/S4ndf1re/doc_find" }
 futures = "0.3.28"
+tonic = "0.9"
+prost = "0.11.0"
+
+[build-dependencies]
+tonic-build = "0.9"
