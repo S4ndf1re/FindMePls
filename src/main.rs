@@ -32,8 +32,6 @@ pub use routes::*;
 pub mod error;
 pub use error::*;
 
-
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -41,9 +39,10 @@ async fn main() {
         .init();
     info!("Starting up");
 
+
     let tokenizer = SimpleTokenizer::new();
-    let filter = EmptyWordFilter {};
-    let storage = MemoryStorage::new();
+    let filter = EmptyWordFilter {  };
+    let storage = MemoryStorage::new("storage.json");
 
     // TODO: add qdrant
     let index = Index::new(None, storage);
@@ -95,19 +94,17 @@ async fn main() {
             .unwrap();
     });
 
-
     let grpc_future = tokio::spawn(async {
-    let addr = "[::1]:50051".parse().unwrap();
-    let greeter = MyGreeter::default();
-    Server::builder()
-        .add_service(GreeterServer::new(greeter))
-        .serve(addr)
-        .await
-        .unwrap();
+        let addr = "[::1]:50051".parse().unwrap();
+        let greeter = MyGreeter::default();
+        Server::builder()
+            .add_service(GreeterServer::new(greeter))
+            .serve(addr)
+            .await
+            .unwrap();
     });
 
     let (web_res, grpc_res) = join!(web_future, grpc_future);
     web_res.unwrap();
     grpc_res.unwrap();
-
 }

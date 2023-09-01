@@ -1,8 +1,7 @@
 use tonic::{Request, Response, Status};
 
-use self::find_me_pls::{greeter_server::Greeter, HelloReply, HelloRequest};
 pub use self::find_me_pls::greeter_server::GreeterServer;
-
+use self::find_me_pls::{greeter_server::Greeter, HelloReply, HelloRequest};
 
 pub mod find_me_pls {
     #![allow(non_snake_case)]

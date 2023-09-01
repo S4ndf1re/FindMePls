@@ -1,0 +1,10 @@
+syntax = "proto3";
+package find_me_pls;
+
+message HelloRequest {
+   string name = 1;
+}
+
+message HelloReply {
+    string message = 1;
+}
