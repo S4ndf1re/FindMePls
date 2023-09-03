@@ -7,7 +7,7 @@ use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
 use tracing::debug;
 
-use crate::{Category, CustError, FileStorage, Item, Name, Price, Result, ID};
+use crate::{CustError, FileStorage, Name, Price, Result, ID, Category, Item};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct DbCategory {

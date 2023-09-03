@@ -1,8 +1,9 @@
 use std::io;
 
 use axum::{
+    body,
     http::StatusCode,
-    response::{IntoResponse, Response}, body,
+    response::{IntoResponse, Response},
 };
 use tracing::warn;
 
@@ -21,6 +22,12 @@ impl CustError {
     }
 }
 
+impl std::fmt::Display for CustError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 impl IntoResponse for CustError {
     fn into_response(self) -> axum::response::Response {
         warn!("Generating error: {}", self.message);
@@ -32,6 +39,10 @@ impl IntoResponse for CustError {
             .body(body::boxed(msg))
             .unwrap()
     }
+}
+
+impl std::error::Error for CustError {
+
 }
 
 impl From<sqlx::Error> for CustError {
@@ -69,4 +80,4 @@ impl From<anyhow::Error> for CustError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
-} 
+}

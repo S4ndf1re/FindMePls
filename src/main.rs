@@ -96,9 +96,9 @@ async fn main() {
 
     let grpc_future = tokio::spawn(async {
         let addr = "[::1]:50051".parse().unwrap();
-        let greeter = MyGreeter::default();
+        let find_me_pls_grpc = FindMePlsService::default();
         Server::builder()
-            .add_service(GreeterServer::new(greeter))
+            .add_service(FindMePlsServer::new(find_me_pls_grpc))
             .serve(addr)
             .await
             .unwrap();
