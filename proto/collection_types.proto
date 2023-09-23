@@ -7,7 +7,7 @@ message Collection {
 }
 
 message Collections {
-    repeated Collection categories = 1;
+    repeated Collection collections = 1;
 }
 
 message GetCollectionResponse {

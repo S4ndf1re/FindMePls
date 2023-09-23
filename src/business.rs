@@ -1,13 +1,15 @@
 use std::{ops::Deref, path::PathBuf, sync::Arc};
 
 use axum::http::StatusCode;
-use doc_search::{Document, EmptyWordFilter, Index, MemoryStorage, SimpleTokenizer};
+use doc_search::{
+    Document, EmptyWordFilter, Index, MemoryStorage, OptionType, QueryOption, SimpleTokenizer,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
 use tracing::debug;
 
-use crate::{CustError, FileStorage, Name, Price, Result, ID, Category, Item};
+use crate::{Category, Collection, CustError, FileStorage, Item, Name, Price, Result, ID};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct DbCategory {
@@ -242,8 +244,13 @@ impl BusinessRules {
         debug!("Searching for: {:?}", name);
         let index = self.index.read().await;
         let mut result = index
-            .tf_idf_all(name.as_str(), &self.tokenizer, &self.filter)
-            .await;
+            .query(
+                name.as_str(),
+                &self.tokenizer,
+                &self.filter,
+                Some(QueryOption::new().add(OptionType::TfIdf).build()),
+            )
+            .await?.collect();
 
         if result.is_empty() {
             return Err(CustError::new(
@@ -381,5 +388,79 @@ impl BusinessRules {
         }
 
         Ok(categories)
+    }
+
+    pub async fn new_collection(&self, cat: Collection) -> Result<Collection> {
+        let mut tx = self.conn.begin().await?;
+
+        sqlx::query("INSERT INTO COLLECTIONS (name) VALUES (?)")
+            .bind(cat.name.clone())
+            .execute(&mut *tx)
+            .await?;
+
+        let last_inserted = sqlx::query("SELECT last_insert_rowid() as id")
+            .fetch_one(&mut *tx)
+            .await?;
+
+        let id: ID = last_inserted.get("id");
+
+        let mut category = cat;
+        category.id = Some(id);
+
+        tx.commit().await?;
+
+        Ok(category)
+    }
+
+    pub async fn get_all_collections(&self) -> Result<Vec<Collection>> {
+        let list = sqlx::query_as::<_, Collection>("SELECT * from collections")
+            .fetch_all(&self.conn)
+            .await?;
+
+        Ok(list)
+    }
+
+    pub async fn get_collection(&self, id: ID) -> Result<Collection> {
+        let collection = sqlx::query_as::<_, Collection>("SELECT * FROM collections WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.conn)
+            .await?;
+
+        Ok(collection)
+    }
+
+    pub async fn add_item_to_collection(&self, item_id: ID, collection_id: ID) -> Result<()> {
+        let mut tx = self.conn.begin().await?;
+
+        let _item = self.get_item(item_id).await?;
+        let _colletion = self.get_collection(collection_id).await?;
+
+        sqlx::query("INSERT INTO collection_items VALUES (?, ?)")
+            .bind(item_id)
+            .bind(collection_id)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn remove_item_from_collection(&self, item_id: ID, collection_id: ID) -> Result<()> {
+        let mut tx = self.conn.begin().await?;
+
+        // TODO: find a way to use tx here
+        let _item = self.get_item(item_id).await?;
+        let _collection = self.get_collection(collection_id).await?;
+
+        sqlx::query("DELETE FROM collection_items WHERE item_id = ? AND collection_id = ?")
+            .bind(item_id)
+            .bind(collection_id)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        Ok(())
     }
 }

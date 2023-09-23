@@ -168,36 +168,103 @@ impl FindMePls for FindMePlsService {
 
     async fn new_collection(
         &self,
-        _request: Request<Collection>,
+        request: Request<Collection>,
     ) -> Result<Response<Collection>, Status> {
-        todo!()
+        let result = self
+            .business_rules
+            .as_ref()
+            .map(|busi| busi.new_collection(request.into_inner().into()));
+
+        match result {
+            Some(coll) => {
+                let collection = coll.await;
+                match collection {
+                    Ok(collection) => Ok(Response::new(collection.into())),
+                    Err(e) => Err(Status::from_error(e.into())),
+                }
+            }
+            None => Err(Status::internal("Business rules not initialized")),
+        }
     }
 
     async fn get_all_collections(
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<Collections>, Status> {
-        todo!()
+        let result = self
+            .business_rules
+            .as_ref()
+            .map(|busi| busi.get_all_collections());
+        match result {
+            Some(future) => future
+                .await
+                .map(|c| {
+                    Response::new(Collections {
+                        collections: c.into_iter().map(Into::into).collect(),
+                    })
+                })
+                .map_err(|e| Status::from_error(e.into())),
+            None => Err(Status::internal("Business rules not initialized")),
+        }
     }
 
     async fn get_collection(
         &self,
-        _request: Request<GetCollectionRequest>,
+        request: Request<GetCollectionRequest>,
     ) -> Result<Response<Collection>, Status> {
-        todo!()
+        let id = request.into_inner().id;
+
+        let future = self.business_rules.as_ref().map(|b| b.get_collection(id));
+        match future {
+            Some(future) => future
+                .await
+                .map(|c| Response::new(c.into()))
+                .map_err(|e| Status::from_error(e.into())),
+            None => Err(Status::internal("Business rules not initialized")),
+        }
     }
 
     async fn add_item_to_collection(
         &self,
-        _request: Request<AddItemToCollectionRequest>,
+        request: Request<AddItemToCollectionRequest>,
     ) -> Result<Response<Empty>, Status> {
-        todo!()
+        let add_item_request = request.into_inner();
+        let item_id = add_item_request.item_id;
+        let collection_id = add_item_request.collection_id;
+
+        let future = self
+            .business_rules
+            .as_ref()
+            .map(|b| b.add_item_to_collection(item_id, collection_id));
+
+        match future {
+            Some(future) => future
+                .await
+                .map(|_| Response::new(Empty {}))
+                .map_err(|e| Status::from_error(e.into())),
+            None => Err(Status::internal("Business rules not initialized")),
+        }
     }
 
     async fn remove_item_from_collection(
         &self,
-        _request: Request<RemoveItemFromCollectionRequest>,
+        request: Request<RemoveItemFromCollectionRequest>,
     ) -> Result<Response<Empty>, Status> {
-        todo!()
+        let remove_item_request = request.into_inner();
+        let item_id = remove_item_request.item_id;
+        let collection_id = remove_item_request.collection_id;
+
+        let future = self
+            .business_rules
+            .as_ref()
+            .map(|b| b.remove_item_from_collection(item_id, collection_id));
+
+        match future {
+            Some(future) => future
+                .await
+                .map(|_| Response::new(Empty {}))
+                .map_err(|e| Status::from_error(e.into())),
+            None => Err(Status::internal("Business rules not initialized")),
+        }
     }
 }
