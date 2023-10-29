@@ -1,11 +1,12 @@
+use std::borrow::Cow;
+
 use axum::http::StatusCode;
 use base64::Engine;
 use serde::Deserialize;
 use serde::Serialize;
-use std::borrow::Cow;
 
-use crate::find_me_pls;
 use crate::CustError;
+use crate::find_me_pls;
 use crate::Result;
 use crate::Storeable;
 
@@ -17,6 +18,7 @@ pub type Price = f32;
 pub struct Collection {
     pub id: Option<ID>,
     pub name: Name,
+    pub thumbnail: Option<String>,
 }
 
 impl From<find_me_pls::Collection> for Collection {
@@ -24,15 +26,51 @@ impl From<find_me_pls::Collection> for Collection {
         Self {
             id: collection.id,
             name: collection.name,
+            thumbnail: collection.thumbnail
+                .map(|t| base64::engine::general_purpose::STANDARD.encode(t)),
         }
     }
 }
 
 impl From<Collection> for find_me_pls::Collection {
     fn from(collection: Collection) -> Self {
+        let thumbnail = match collection.thumbnail {
+            Some(thumbnail) => match base64::engine::general_purpose::STANDARD.decode(thumbnail) {
+                Ok(thumbnail) => Some(thumbnail),
+                _ => None,
+            },
+            None => None,
+        };
         Self {
             id: collection.id,
             name: collection.name,
+            thumbnail,
+        }
+    }
+}
+
+impl Storeable for Collection {
+    fn as_bytes<'a>(&'a self) -> Result<Cow<'a, Vec<u8>>> {
+        Ok(match &self.thumbnail {
+            Some(thumbnail) => {
+                Cow::Owned(base64::engine::general_purpose::STANDARD.decode(thumbnail)?)
+            }
+            None => Cow::Owned(vec![]),
+        })
+    }
+
+    fn change_from_bytes(&mut self, bytes: &[u8]) {
+        let thumbnail = base64::engine::general_purpose::STANDARD.encode(bytes);
+        self.thumbnail = Some(thumbnail);
+    }
+
+    fn filename<'a>(&'a self) -> Result<Cow<'a, str>> {
+        match self.id {
+            Some(id) => Ok(Cow::Owned(format!("{}.dat", id))),
+            None => Err(CustError::new(
+                "No valid id, therefore no existing filename".to_owned(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
         }
     }
 }

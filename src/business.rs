@@ -7,9 +7,34 @@ use doc_search::{
 use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, error};
 
-use crate::{Category, Collection, CustError, FileStorage, Item, Name, Price, Result, ID};
+use crate::{Category, Collection, CustError, FileStorage, ID, Item, Name, Price, Result};
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct DbCollection {
+    pub id: Option<ID>,
+    pub name: Name,
+}
+
+impl From<DbCollection> for Collection {
+    fn from(db: DbCategory) -> Self {
+        Self {
+            id: db.id,
+            name: db.name,
+            thumbnail: None,
+        }
+    }
+}
+
+impl From<Collection> for DbCollection {
+    fn from(db: Collection) -> Self {
+        Self {
+            id: db.id,
+            name: db.name,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct DbCategory {
@@ -78,6 +103,7 @@ pub struct BusinessRules {
     conn: sqlx::SqlitePool,
     category_files: FileStorage<Category>,
     item_files: FileStorage<Item>,
+    collection_files: FileStorage<Collection>,
     index: RwLock<Index<i64, MemoryStorage<i64>, PathBuf>>,
     tokenizer: SimpleTokenizer,
     filter: EmptyWordFilter,
@@ -99,6 +125,7 @@ impl BusinessRules {
             conn,
             category_files: FileStorage::new(PathBuf::from("./categories")),
             item_files: FileStorage::new(PathBuf::from("./items")),
+            collection_files: FileStorage::new(PathBuf::from("./collections")),
             index,
             tokenizer,
             filter,
@@ -124,8 +151,8 @@ impl BusinessRules {
         );
         "#,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         db.execute(
             r#"
@@ -137,16 +164,16 @@ impl BusinessRules {
         );
         "#,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         db.execute(
             r#"
         CREATE UNIQUE INDEX IF NOT EXISTS category_name ON categories(name);
         "#,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         db.execute(
             r#"
@@ -156,16 +183,16 @@ impl BusinessRules {
         );
         "#,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         db.execute(
             r#"
         CREATE UNIQUE INDEX IF NOT EXISTS collections_name ON collections(name);
         "#,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         db.execute(
             r#"
@@ -178,8 +205,8 @@ impl BusinessRules {
         );
         "#,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
     }
 
     pub async fn add_item(&self, mut item: Item) -> Result<Item> {
@@ -225,7 +252,10 @@ impl BusinessRules {
             .await?
             .into();
 
-        self.item_files.read(&mut item).await?;
+        let result = self.item_files.read(&mut item).await;
+        if result.is_err() {
+            error!("{}", result.err().unwrap());
+        }
 
         Ok(item)
     }
@@ -284,7 +314,10 @@ impl BusinessRules {
 
         let mut items: Vec<_> = items.into_iter().filter(|x| x.0.is_some()).collect();
         for (_, item) in &mut items {
-            self.item_files.read(item).await?;
+            let result = self.item_files.read(item).await;
+            if result.is_err() {
+                error!("{}", result.err().unwrap());
+            }
         }
 
         items.sort_by(|x, y| x.0.unwrap().total_cmp(&y.0.unwrap()));
@@ -301,7 +334,10 @@ impl BusinessRules {
             .collect();
 
         for item in &mut items {
-            self.item_files.read(item).await?;
+            let result = self.item_files.read(item).await;
+            if result.is_err() {
+                error!("{}", result.err().unwrap());
+            }
         }
 
         Ok(items)
@@ -384,17 +420,20 @@ impl BusinessRules {
                 .collect();
 
         for category in &mut categories {
-            self.category_files.read(category).await?;
+            let result = self.category_files.read(category).await;
+            if result.is_err() {
+                error!("{}", result.err().unwrap());
+            }
         }
 
         Ok(categories)
     }
 
-    pub async fn new_collection(&self, cat: Collection) -> Result<Collection> {
+    pub async fn new_collection(&self, coll: Collection) -> Result<Collection> {
         let mut tx = self.conn.begin().await?;
 
         sqlx::query("INSERT INTO COLLECTIONS (name) VALUES (?)")
-            .bind(cat.name.clone())
+            .bind(coll.name.clone())
             .execute(&mut *tx)
             .await?;
 
@@ -404,27 +443,41 @@ impl BusinessRules {
 
         let id: ID = last_inserted.get("id");
 
-        let mut category = cat;
-        category.id = Some(id);
+        let mut collection = coll;
+        collection.id = Some(id);
+
+        self.collection_files.store(&collection).await?;
 
         tx.commit().await?;
 
-        Ok(category)
+        Ok(collection)
     }
 
     pub async fn get_all_collections(&self) -> Result<Vec<Collection>> {
-        let list = sqlx::query_as::<_, Collection>("SELECT * from collections")
+        let mut list = sqlx::query_as::<_, Collection>("SELECT * from collections")
             .fetch_all(&self.conn)
             .await?;
+
+        for c in &mut list {
+            let result = self.collection_files.read(c).await;
+            if result.is_err() {
+                error!("{}", result.err().unwrap());
+            }
+        }
 
         Ok(list)
     }
 
     pub async fn get_collection(&self, id: ID) -> Result<Collection> {
-        let collection = sqlx::query_as::<_, Collection>("SELECT * FROM collections WHERE id = ?")
+        let mut collection = sqlx::query_as::<_, Collection>("SELECT * FROM collections WHERE id = ?")
             .bind(id)
             .fetch_one(&self.conn)
             .await?;
+
+        let result = self.collection_files.read(&mut collection).await;
+        if result.is_err() {
+            error!("{}", result.err().unwrap());
+        }
 
         Ok(collection)
     }
