@@ -84,7 +84,8 @@ async fn main() {
             delete(remove_item_from_collection),
         );
 
-    let app = app.with_state(Arc::new(state));
+    let rules = Arc::new(state);
+    let app = app.with_state(Arc::clone(&rules));
 
     let web_future = tokio::spawn(async {
         // run it with hyper on localhost:3000
@@ -96,7 +97,7 @@ async fn main() {
 
     let grpc_future = tokio::spawn(async {
         let addr = "[::1]:50051".parse().unwrap();
-        let find_me_pls_grpc = FindMePlsService::default();
+        let find_me_pls_grpc = FindMePlsService::new(rules);
         Server::builder()
             .add_service(FindMePlsServer::new(find_me_pls_grpc))
             .serve(addr)
