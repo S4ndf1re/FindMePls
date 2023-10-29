@@ -96,7 +96,7 @@ async fn main() {
     });
 
     let grpc_future = tokio::spawn(async {
-        let addr = "[::1]:50051".parse().unwrap();
+        let addr = "0.0.0.0:50051".parse().unwrap();
         let find_me_pls_grpc = FindMePlsService::new(rules);
         Server::builder()
             .add_service(FindMePlsServer::new(find_me_pls_grpc))
