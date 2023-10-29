@@ -1,36 +1,38 @@
+use std::sync::Arc;
+
+use axum::Router;
+use axum::routing::delete;
+use axum::routing::get;
+use axum::routing::post;
 use doc_search::EmptyWordFilter;
 use doc_search::Index;
 use doc_search::MemoryStorage;
 use doc_search::SimpleTokenizer;
 use futures::join;
 use tonic::transport::Server;
-
-use std::sync::Arc;
-use tracing::log::info;
 use tracing::Level;
+use tracing::log::info;
 
-use axum::routing::delete;
-use axum::routing::get;
-use axum::routing::post;
-use axum::Router;
-
-pub mod grpc_service;
-pub use grpc_service::*;
-
-pub mod files;
+pub use business::*;
+pub use error::*;
 pub use files::*;
-
-pub mod types;
+pub use grpc_service::*;
+pub use routes::*;
 pub use types::*;
 
+pub mod grpc_service;
+
+pub mod files;
+
+pub mod types;
+
 pub mod business;
-pub use business::*;
 
 pub mod routes;
-pub use routes::*;
 
 pub mod error;
-pub use error::*;
+
+mod util;
 
 #[tokio::main]
 async fn main() {
@@ -41,7 +43,7 @@ async fn main() {
 
 
     let tokenizer = SimpleTokenizer::new();
-    let filter = EmptyWordFilter {  };
+    let filter = EmptyWordFilter {};
     let storage = MemoryStorage::new("storage.json");
 
     // TODO: add qdrant

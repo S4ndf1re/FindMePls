@@ -15,7 +15,7 @@ serde_json = "1.0.100"
 tokio = { version = "1.29.1", features = ["full"] }
 tower = "0.4.13"
 tower-http = "0.4.1"
-sqlx = { version = "0.7", features = [ "runtime-tokio", "sqlite" ] }
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 probly-search = "2.0.0-alpha-2"
@@ -25,6 +25,7 @@ doc_search = { git = "https://github.com/S4ndf1re/doc_find" }
 futures = "0.3.28"
 tonic = "0.9"
 prost = "0.11.0"
+thiserror = "1.0.50"
 
 [build-dependencies]
 tonic-build = "0.9"

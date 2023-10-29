@@ -9,7 +9,7 @@ use sqlx::{Executor, Row};
 use tokio::sync::RwLock;
 use tracing::{debug, error};
 
-use crate::{Category, Collection, CustError, FileStorage, ID, Item, Name, Price, Result};
+use crate::{Category, Collection, CustError, FileStorage, ID, Item, Name, Price, Result, util};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct DbCollection {
@@ -18,7 +18,7 @@ pub struct DbCollection {
 }
 
 impl From<DbCollection> for Collection {
-    fn from(db: DbCategory) -> Self {
+    fn from(db: DbCollection) -> Self {
         Self {
             id: db.id,
             name: db.name,
@@ -211,6 +211,9 @@ impl BusinessRules {
 
     pub async fn add_item(&self, mut item: Item) -> Result<Item> {
         debug!("Adding item: {:?}", item);
+        util::name_rules(&item.name)?;
+
+
         let mut tx = self.conn.begin().await?;
 
         sqlx::query("INSERT INTO items (name, description, category_id, price, image) VALUES (?, ?, ?, ?, ?)")
@@ -371,6 +374,7 @@ impl BusinessRules {
 
     pub async fn new_category(&self, mut category: Category) -> Result<Category> {
         debug!("adding new category: {:?}", category);
+        util::name_rules(&category.name)?;
         category.id = None;
         let mut tx = self.conn.begin().await?;
 
@@ -430,6 +434,7 @@ impl BusinessRules {
     }
 
     pub async fn new_collection(&self, coll: Collection) -> Result<Collection> {
+        util::name_rules(&coll.name)?;
         let mut tx = self.conn.begin().await?;
 
         sqlx::query("INSERT INTO COLLECTIONS (name) VALUES (?)")

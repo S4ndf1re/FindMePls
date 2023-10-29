@@ -6,6 +6,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tracing::warn;
+use thiserror::Error;
+
+
+#[derive(Error, Debug)]
+pub enum NameError {
+    #[error("name value is empty")]
+    Empty,
+}
 
 pub type Result<T> = core::result::Result<T, CustError>;
 
@@ -41,9 +49,7 @@ impl IntoResponse for CustError {
     }
 }
 
-impl std::error::Error for CustError {
-
-}
+impl std::error::Error for CustError {}
 
 impl From<sqlx::Error> for CustError {
     fn from(e: sqlx::Error) -> Self {
@@ -79,5 +85,11 @@ impl From<anyhow::Error> for CustError {
             message: format!("Error: {}", e),
             status: StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+}
+
+impl From<NameError> for CustError {
+    fn from(value: NameError) -> Self {
+        Self::new(value.to_string(), StatusCode::BAD_REQUEST)
     }
 }
