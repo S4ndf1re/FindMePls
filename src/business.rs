@@ -211,7 +211,7 @@ impl BusinessRules {
 
     pub async fn add_item(&self, mut item: Item) -> Result<Item> {
         debug!("Adding item: {:?}", item);
-        util::name_rules(&item.name)?;
+        item.name = util::sanitize_name(&item.name)?.to_owned();
 
 
         let mut tx = self.conn.begin().await?;
@@ -374,7 +374,7 @@ impl BusinessRules {
 
     pub async fn new_category(&self, mut category: Category) -> Result<Category> {
         debug!("adding new category: {:?}", category);
-        util::name_rules(&category.name)?;
+        category.name = util::sanitize_name(&category.name)?.to_owned();
         category.id = None;
         let mut tx = self.conn.begin().await?;
 
@@ -433,8 +433,8 @@ impl BusinessRules {
         Ok(categories)
     }
 
-    pub async fn new_collection(&self, coll: Collection) -> Result<Collection> {
-        util::name_rules(&coll.name)?;
+    pub async fn new_collection(&self, mut coll: Collection) -> Result<Collection> {
+        coll.name = util::sanitize_name(&coll.name)?.to_owned();
         let mut tx = self.conn.begin().await?;
 
         sqlx::query("INSERT INTO COLLECTIONS (name) VALUES (?)")
